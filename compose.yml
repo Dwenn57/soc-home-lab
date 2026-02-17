@@ -1,0 +1,146 @@
+services:
+
+# CLUSTER ON RED ERROR WATERMARK MY BALLS NEED TO CHANGE THE ESDATA DIRECTORY and try
+# to put it on the other hard drive...
+
+  elasticsearch:
+    # build:
+    #   context: ./elasticsearch           # current folder (where the Dockerfile is)
+    #   dockerfile: Dockerfile
+    image: docker-compose-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - ELASTIC_PASSWORD=xxxxx
+      - xpack.security.enrollment.enabled=false
+
+    ports: ["9200:9200"]
+    volumes:
+      - /mnt/d/elastic_data:/usr/share/elasticsearch/data
+      #- ./elasticsearch/esdata:/usr/share/elasticsearch/data   # ← PERSISTS users/roles/tokens
+      #- .elasticsearch/esconfig:/usr/share/elasticsearch/config
+    container_name: elasticsearch
+    networks: [ubuntunet]
+
+
+  kibana:
+    # build:
+    #   context: ./kibana           # current folder (where the Dockerfile is)
+    #   dockerfile: Dockerfile
+    image: docker-compose-kibana
+
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      # === Choose ONE of the 2 methods below ===
+      # Method 1 (recommended without TLS): Service Account Token
+      #- ELASTICSEARCH_SERVICE_ACCOUNT_TOKEN=${KIBANA_TOKEN:-}
+
+      # Method 2 (alternative): kibana_system account (uncomment if you use it)
+      - ELASTICSEARCH_USERNAME=xxxxx
+#      - ELASTICSEARCH_USERNAME=xxxxx
+
+      - ELASTICSEARCH_PASSWORD=xxxxx
+
+      # Encryption key (>= 32 characters)
+      #- xpack.encryptedSavedObjects.encryptionKey=xxxxxxxx
+
+      # (optional) disable Fleet onboarding (useless without TLS)
+      # - xpack.fleet.enabled=false
+    volumes:
+      - ./kibana/kibana-data:/usr/share/kibana/data   # ← persisted keystore & data
+      - ./kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      
+    ports: ["5601:5601"]
+    depends_on: [elasticsearch]
+    container_name: kibana
+    networks: [ubuntunet]
+
+
+  # ubuntu1:
+  #   build:
+  #     context: ./ubuntu1
+  #     dockerfile: Dockerfile
+  #   container_name: ubuntu1
+  #   hostname: ubuntu1
+  #   networks: [ubuntunet]
+  #   #depends_on: [logstash]
+  #   volumes:
+  #     - ./ubuntu1/filebeat/filebeat.yml:/etc/filebeat/filebeat.yml:ro
+  #     # If you want to inject application logs from the host:
+  #     # - ./logs:/var/log/app
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #     - KIBANA_HOSTS=http://kibana:5601
+  #   # Run filebeat in foreground (logs visible in `docker logs ubuntu1`)
+  #   command: ["filebeat","-e","-strict.perms=false","-c","/etc/filebeat/filebeat.yml"]
+  #   # user: root   # useful if permission issues on /var/log, enable if needed
+
+
+
+  db:
+    image: mariadb:10.11
+    # ... (no French here)
+
+
+  dvwa:
+    # ... (no French here)
+
+
+# this filebeat works and already parses the logs so no real need for logstash
+  filebeat:
+    # build:
+    #   context: ./filebeat
+    #   dockerfile: Dockerfile
+    image: docker.elastic.co/beats/filebeat:8.14.3
+    container_name: filebeat
+    user: root                               
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./dvwa/dvwa_logs:/var/log/apache2:ro
+    depends_on: [elasticsearch]
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOSTS=http://kibana:5601
+      - ELASTICSEARCH_USERNAME=xxxxx
+      - ELASTICSEARCH_PASSWORD=xxxxx    
+    networks: [ubuntunet]
+    # apparently this is not best practice but since it's on Windows I can't change the perms like on Linux
+    #command: ["filebeat","-e","-strict.perms=false","-c","/usr/share/filebeat/filebeat.yml"]
+    command: >
+      sh -c " 
+        filebeat -strict.perms=false -e -c /usr/share/filebeat/filebeat.yml setup &&
+        exec filebeat -strict.perms=false -e -c /usr/share/filebeat/filebeat.yml
+      "    
+  
+  # logstash:
+  #   ... (no French here)
+
+
+  # === New Ubuntu container for your lab ===
+  ubuntu-lab:
+    image: ubuntu:22.04
+    container_name: ubuntu-lab
+    network_mode: host
+    tty: true
+    stdin_open: true
+    user: root
+    command: ["/bin/bash"]
+    volumes:
+      - ./ubuntu-lab:/root/lab
+    # Install some tools at startup (optional)
+    entrypoint: >
+      sh -c "apt update && apt install -y iputils-ping curl netcat telnet dnsutils && exec bash"
+
+
+volumes:
+  filebeat-data: {}
+  db_data:
+  dvwa_logs:
+
+
+networks:
+  ubuntunet:
+    driver: bridge
